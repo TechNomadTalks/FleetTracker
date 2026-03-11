@@ -1,0 +1,120 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  admin
+  user
+}
+
+enum VehicleStatus {
+  available
+  out
+}
+
+enum FuelType {
+  petrol
+  diesel
+  electric
+  hybrid
+}
+
+enum NotificationType {
+  checkout
+  checkin
+  service_reminder
+}
+
+model User {
+  id                String   @id @default(uuid())
+  email             String   @unique
+  passwordHash      String
+  name              String
+  role              Role     @default(user)
+  emailNotifications Boolean  @default(true)
+  isActive          Boolean  @default(true)
+  refreshToken      String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  trips          Trip[]
+  notifications  Notification[]
+  vehicles       Vehicle[]
+}
+
+model Vehicle {
+  id                String        @id @default(uuid())
+  registrationNumber String        @unique
+  make              String
+  model             String
+  currentMileage    Int            @default(0)
+  serviceInterval   Int            @default(10000)
+  lastServiceMileage Int           @default(0)
+  status            VehicleStatus @default(available)
+  assignedUserId    String?
+  insuranceExpiry   DateTime?
+  registrationExpiry DateTime?
+  fuelType          FuelType?
+  fuelEfficiency    Float?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  assignedUser      User?         @relation(fields: [assignedUserId], references: [id])
+  trips        Trip[]
+  serviceLogs  ServiceLog[]
+}
+
+enum TripPurpose {
+  business
+  personal
+  maintenance
+}
+
+model Trip {
+  id            String       @id @default(uuid())
+  vehicleId     String
+  userId        String
+  destination   String
+  startMileage  Int
+  endMileage    Int?
+  startTime     DateTime     @default(now())
+  endTime       DateTime?
+  mileageDriven Int?
+  purpose       TripPurpose  @default(business)
+  notes         String?
+  expenses      Float?
+  receipt       Bytes?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  vehicle      Vehicle   @relation(fields: [vehicleId], references: [id])
+  user         User      @relation(fields: [userId], references: [id])
+}
+
+model ServiceLog {
+  id              String   @id @default(uuid())
+  vehicleId       String
+  serviceType     String
+  mileageAtService Int
+  notes           String?
+  performedAt     DateTime @default(now())
+  createdAt       DateTime @default(now())
+
+  vehicle         Vehicle  @relation(fields: [vehicleId], references: [id])
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  type      NotificationType
+  message   String
+  read      Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  user      User             @relation(fields: [userId], references: [id])
+}
