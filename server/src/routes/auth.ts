@@ -1,13 +1,29 @@
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import prisma from '../config/prisma';
 import { AuthRequest } from '../types';
 import { authMiddleware } from '../middleware/auth';
 import { validate, registerValidation, loginValidation } from '../middleware/validation';
 import logger from '../utils/logger';
+import { createAuditLog } from '../services/audit';
 
 const router = Router();
+
+const generateCsrfToken = () => crypto.randomBytes(32).toString('hex');
+
+const logAuthAudit = async (req: Request, action: 'LOGIN' | 'LOGOUT' | 'USER_CREATE', userId?: string, email?: string, success?: boolean) => {
+  await createAuditLog({
+    userId,
+    userEmail: email,
+    action,
+    targetType: 'Auth',
+    details: { success, ip: req.ip, userAgent: req.get('user-agent') },
+    ipAddress: req.ip || (req as any).socket?.remoteAddress,
+    userAgent: req.get('user-agent'),
+  });
+};
 
 router.post('/register', validate(registerValidation), async (req: Request, res: Response) => {
   try {
@@ -41,19 +57,28 @@ router.post('/register', validate(registerValidation), async (req: Request, res:
     );
 
     const refreshToken = jwt.sign(
-      { userId: user.id },
+      { userId: user.id, tokenVersion: 0 },
       process.env.JWT_REFRESH_SECRET!,
-      { expiresIn: '2d' }
+      { expiresIn: '7d' }
     );
+
+    const csrfToken = generateCsrfToken();
 
     await prisma.user.update({
       where: { id: user.id },
       data: { refreshToken },
     });
 
+    await logAuthAudit(req, 'USER_CREATE', user.id, email, true);
+
     res.status(201).json({
-      success: false,
-      error: 'Registration failed',
+      success: true,
+      data: {
+        user: { id: user.id, email: user.email, name: user.name, role: user.role },
+        accessToken,
+        refreshToken,
+        csrfToken,
+      },
     });
   } catch (error) {
     logger.error('Register error', { error: error instanceof Error ? error.message : String(error) });
@@ -76,6 +101,7 @@ router.post('/login', validate(loginValidation), async (req: Request, res: Respo
 
     const validPassword = await bcrypt.compare(password, user.passwordHash);
     if (!validPassword) {
+      await logAuthAudit(req, 'LOGIN', undefined, email, false);
       return res.status(401).json({ success: false, error: 'Invalid credentials' });
     }
 
@@ -85,23 +111,28 @@ router.post('/login', validate(loginValidation), async (req: Request, res: Respo
       { expiresIn: '15m' }
     );
 
-    const refreshToken = jwt.sign(
-      { userId: user.id, tokenVersion: Date.now() },
+    const newRefreshToken = jwt.sign(
+      { userId: user.id, tokenVersion: user.tokenVersion || 0 },
       process.env.JWT_REFRESH_SECRET!,
-      { expiresIn: '2d' }
+      { expiresIn: '7d' }
     );
+
+    const csrfToken = generateCsrfToken();
 
     await prisma.user.update({
       where: { id: user.id },
-      data: { refreshToken },
+      data: { refreshToken: newRefreshToken },
     });
+
+    await logAuthAudit(req, 'LOGIN', user.id, email, true);
 
     res.json({
       success: true,
       data: {
         user: { id: user.id, email: user.email, name: user.name, role: user.role },
         accessToken,
-        refreshToken,
+        refreshToken: newRefreshToken,
+        csrfToken,
       },
     });
   } catch (error) {
@@ -139,9 +170,9 @@ router.post('/refresh', async (req: Request, res: Response) => {
     );
 
     const newRefreshToken = jwt.sign(
-      { userId: user.id, tokenVersion: Date.now() },
+      { userId: user.id, tokenVersion: user.tokenVersion || 0 },
       process.env.JWT_REFRESH_SECRET!,
-      { expiresIn: '2d' }
+      { expiresIn: '7d' }
     );
 
     await prisma.user.update({
@@ -162,6 +193,7 @@ router.post('/logout', authMiddleware, async (req: AuthRequest, res: Response) =
       where: { id: req.user!.userId },
       data: { refreshToken: null },
     });
+    await logAuthAudit(req, 'LOGOUT', req.user!.userId, req.user!.email, true);
     res.json({ success: true, message: 'Logged out successfully' });
   } catch (error) {
     logger.error('Logout error', { error: error instanceof Error ? error.message : String(error) });

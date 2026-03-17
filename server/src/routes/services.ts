@@ -4,12 +4,15 @@ import { AuthRequest } from '../types';
 import { authMiddleware, adminMiddleware } from '../middleware/auth';
 import { validate, serviceValidation, uuidParam } from '../middleware/validation';
 import logger from '../utils/logger';
+import { emitServiceReminder, emitVehicleStatus } from '../index';
 
 const router = Router();
 
 router.post('/', authMiddleware, adminMiddleware, validate(serviceValidation), async (req: AuthRequest, res: Response) => {
   try {
     const { vehicleId, serviceType, mileageAtService, notes } = req.body;
+
+    const vehicle = await prisma.vehicle.findUnique({ where: { id: vehicleId } });
 
     const serviceLog = await prisma.serviceLog.create({
       data: {
@@ -26,6 +29,13 @@ router.post('/', authMiddleware, adminMiddleware, validate(serviceValidation), a
         lastServiceMileage: mileageAtService,
       },
     });
+
+    const milesUntilService = (vehicle?.serviceInterval || 10000) - (mileageAtService - (vehicle?.lastServiceMileage || 0));
+    if (milesUntilService <= 500) {
+      emitServiceReminder(vehicleId, `Service due soon for ${vehicle?.registrationNumber}: ${milesUntilService} miles remaining`);
+    }
+
+    emitVehicleStatus(vehicleId, vehicle?.status || 'available', req.user!.email);
 
     res.status(201).json({ success: true, data: serviceLog });
   } catch (error) {

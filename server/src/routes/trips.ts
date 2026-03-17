@@ -4,8 +4,23 @@ import { AuthRequest } from '../types';
 import { authMiddleware } from '../middleware/auth';
 import { validate, checkoutValidation, checkinValidation, uuidParam } from '../middleware/validation';
 import logger from '../utils/logger';
+import { emitVehicleStatus, emitTripCreated, emitNotification } from '../index';
+import { createAuditLog } from '../services/audit';
 
 const router = Router();
+
+const logAudit = async (req: AuthRequest, action: any, targetType: string, targetId?: string, details?: any) => {
+  await createAuditLog({
+    userId: req.user?.userId,
+    userEmail: req.user?.email,
+    action,
+    targetType,
+    targetId,
+    details,
+    ipAddress: req.ip || req.socket.remoteAddress,
+    userAgent: req.get('user-agent'),
+  });
+};
 
 router.post('/checkout', authMiddleware, validate(checkoutValidation), async (req: AuthRequest, res: Response) => {
   try {
@@ -44,16 +59,30 @@ router.post('/checkout', authMiddleware, validate(checkoutValidation), async (re
       data: { status: 'out' },
     });
 
+    emitVehicleStatus(vehicleId, 'out', req.user!.email);
+
     const admins = await prisma.user.findMany({ where: { role: 'admin' } });
     for (const admin of admins) {
-      await prisma.notification.create({
+      const notification = await prisma.notification.create({
         data: {
           userId: admin.id,
           type: 'checkout',
           message: `${req.user!.email} checked out ${vehicle.registrationNumber} to ${destination}`,
         },
       });
+      emitNotification(admin.id, notification);
     }
+
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { name: true, email: true } });
+    emitTripCreated(trip, vehicle, user);
+
+    await logAudit(req, 'TRIP_CHECKOUT', 'Trip', trip.id, { 
+      vehicleId,
+      registrationNumber: vehicle.registrationNumber,
+      destination,
+      purpose: purpose || 'business',
+      startMileage: currentMileage
+    });
 
     res.status(201).json({ success: true, data: trip });
   } catch (error) {
@@ -110,16 +139,28 @@ router.post('/:id/checkin', authMiddleware, validate(checkinValidation), async (
       },
     });
 
+    emitVehicleStatus(trip.vehicleId, 'available', req.user!.email);
+
     const admins = await prisma.user.findMany({ where: { role: 'admin' } });
     for (const admin of admins) {
-      await prisma.notification.create({
+      const notification = await prisma.notification.create({
         data: {
           userId: admin.id,
           type: 'checkin',
           message: `${trip.vehicle?.registrationNumber || 'Vehicle'} returned - ${mileageDriven} miles driven`,
         },
       });
+      emitNotification(admin.id, notification);
     }
+
+    await logAudit(req, 'TRIP_CHECKIN', 'Trip', id, { 
+      vehicleId: trip.vehicleId,
+      registrationNumber: trip.vehicle?.registrationNumber,
+      startMileage: trip.startMileage,
+      endMileage,
+      mileageDriven,
+      expenses: expenses ? parseFloat(expenses) : null
+    });
 
     res.json({ success: true, data: updatedTrip });
   } catch (error) {

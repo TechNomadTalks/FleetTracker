@@ -5,25 +5,33 @@ import { Trip } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { ToastContainer, toast } from 'react-toastify';
 
+const ITEMS_PER_PAGE = 10;
+
 export const TripsPage: React.FC = () => {
   const { user } = useAuth();
   const [trips, setTrips] = useState<Trip[]>([]);
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
   const [showCheckin, setShowCheckin] = useState(false);
   const [selectedTrip, setSelectedTrip] = useState<Trip | null>(null);
   const [endMileage, setEndMileage] = useState(0);
   const [expenses, setExpenses] = useState('');
   const [notes, setNotes] = useState('');
   const [filter, setFilter] = useState<'all' | 'active' | 'completed'>('all');
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     fetchTrips();
-  }, []);
+  }, [page]);
 
   const fetchTrips = async () => {
     try {
+      setLoading(true);
       const res = await tripService.getAll();
-      setTrips(res.data.data);
+      const allTrips = res.data.data;
+      setTotalPages(Math.ceil(allTrips.length / ITEMS_PER_PAGE));
+      setTrips(allTrips);
     } catch (error) {
       toast.error('Failed to load trips');
     } finally {
@@ -40,17 +48,34 @@ export const TripsPage: React.FC = () => {
   };
 
   const submitCheckin = async () => {
-    if (!selectedTrip) return;
+    if (!selectedTrip || submitting) return;
+    
+    const originalTrips = [...trips];
+    const optimisticTrip = {
+      ...selectedTrip,
+      endMileage,
+      mileageDriven: endMileage - selectedTrip.startMileage,
+      expenses: parseFloat(expenses) || 0,
+      notes,
+      endTime: new Date().toISOString(),
+    };
+    
+    setTrips(trips.map(t => t.id === selectedTrip.id ? optimisticTrip : t));
+    setSubmitting(true);
+    setShowCheckin(false);
+    
     try {
       await tripService.checkin(selectedTrip.id, endMileage, parseFloat(expenses) || undefined, notes);
       toast.success('Vehicle checked in successfully!');
-      setShowCheckin(false);
       setSelectedTrip(null);
       setExpenses('');
       setNotes('');
       fetchTrips();
     } catch (error: any) {
+      setTrips(originalTrips);
       toast.error(error.response?.data?.error || 'Checkin failed');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -62,11 +87,47 @@ export const TripsPage: React.FC = () => {
     return true;
   });
 
-  if (loading) {
+  const paginatedTrips = filteredTrips.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
+
+  const SkeletonRow = () => (
+    <tr>
+      <td className="px-6 py-4"><div className="h-10 bg-gray-700 rounded animate-pulse"></div></td>
+      <td className="px-6 py-4"><div className="h-4 bg-gray-700 rounded w-24 animate-pulse"></div></td>
+      <td className="px-6 py-4"><div className="h-4 bg-gray-700 rounded w-20 animate-pulse"></div></td>
+      <td className="px-6 py-4"><div className="h-4 bg-gray-700 rounded w-24 animate-pulse"></div></td>
+      <td className="px-6 py-4"><div className="h-4 bg-gray-700 rounded w-16 animate-pulse"></div></td>
+      <td className="px-6 py-4"><div className="h-4 bg-gray-700 rounded w-16 animate-pulse"></div></td>
+      <td className="px-6 py-4"><div className="h-4 bg-gray-700 rounded w-16 animate-pulse"></div></td>
+      <td className="px-6 py-4"><div className="h-6 bg-gray-700 rounded w-20 animate-pulse"></div></td>
+    </tr>
+  );
+
+  if (loading && trips.length === 0) {
     return (
       <Layout>
-        <div className="flex justify-center items-center h-64">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+        <ToastContainer theme="dark" position="top-right" />
+        <div className="mb-8">
+          <div className="h-8 bg-gray-700 rounded w-48 animate-pulse mb-2"></div>
+          <div className="h-4 bg-gray-700 rounded w-64 animate-pulse"></div>
+        </div>
+        <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
+          <table className="w-full">
+            <thead className="bg-gray-750">
+              <tr>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-400 uppercase">Vehicle</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-400 uppercase">Destination</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-400 uppercase">Purpose</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-400 uppercase">Driver</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-400 uppercase">Start</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-400 uppercase">End</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-400 uppercase">Miles</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-400 uppercase">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-700">
+              {[...Array(5)].map((_, i) => <SkeletonRow key={i} />)}
+            </tbody>
+          </table>
         </div>
       </Layout>
     );
@@ -153,7 +214,7 @@ export const TripsPage: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-700">
-              {filteredTrips.map((trip) => (
+              {paginatedTrips.map((trip) => (
                 <tr key={trip.id} className="hover:bg-gray-750 transition">
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex items-center">
@@ -204,6 +265,31 @@ export const TripsPage: React.FC = () => {
             </tbody>
           </table>
         </div>
+        
+        {filteredTrips.length > ITEMS_PER_PAGE && (
+          <div className="px-6 py-4 border-t border-gray-700 flex items-center justify-between">
+            <div className="text-sm text-gray-400">
+              Showing {((page - 1) * ITEMS_PER_PAGE) + 1} to {Math.min(page * ITEMS_PER_PAGE, filteredTrips.length)} of {filteredTrips.length} trips
+            </div>
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={page === 1}
+                className="px-3 py-1 bg-gray-700 text-gray-300 rounded hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Previous
+              </button>
+              <span className="text-gray-400 text-sm">Page {page} of {totalPages}</span>
+              <button
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages}
+                className="px-3 py-1 bg-gray-700 text-gray-300 rounded hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {showCheckin && selectedTrip && (

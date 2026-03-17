@@ -1,20 +1,29 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 
 const prisma = new PrismaClient();
+
+function generateSecurePassword(length = 16): string {
+  const charset = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*';
+  return crypto.randomBytes(length).toString('hex').slice(0, length);
+}
 
 async function main() {
   console.log('Seeding database...');
 
-  const adminPassword = await bcrypt.hash('admin123', 10);
-  const userPassword = await bcrypt.hash('user123', 10);
+  const adminPassword = process.env.SEED_ADMIN_PASSWORD || generateSecurePassword();
+  const userPassword = process.env.SEED_USER_PASSWORD || generateSecurePassword(12);
+
+  const adminPwdHash = await bcrypt.hash(adminPassword, 12);
+  const userPwdHash = await bcrypt.hash(userPassword, 12);
 
   const admin = await prisma.user.upsert({
     where: { email: 'admin@fleettracker.com' },
     update: {},
     create: {
       email: 'admin@fleettracker.com',
-      passwordHash: adminPassword,
+      passwordHash: adminPwdHash,
       name: 'Admin User',
       role: 'admin',
     },
@@ -25,7 +34,7 @@ async function main() {
     update: {},
     create: {
       email: 'user@fleettracker.com',
-      passwordHash: userPassword,
+      passwordHash: userPwdHash,
       name: 'Regular User',
       role: 'user',
     },
@@ -70,8 +79,14 @@ async function main() {
   }
 
   console.log('Database seeded successfully!');
-  console.log('Admin credentials: admin@fleettracker.com / admin123');
-  console.log('User credentials: user@fleettracker.com / user123');
+  if (!process.env.SEED_ADMIN_PASSWORD) {
+    console.log('Generated admin password:', adminPassword);
+  }
+  if (!process.env.SEED_USER_PASSWORD) {
+    console.log('Generated user password:', userPassword);
+  }
+  console.log('Admin credentials: admin@fleettracker.com / (check above or set SEED_ADMIN_PASSWORD)');
+  console.log('User credentials: user@fleettracker.com / (check above or set SEED_USER_PASSWORD)');
 }
 
 main()

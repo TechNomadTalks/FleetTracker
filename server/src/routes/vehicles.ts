@@ -4,8 +4,22 @@ import { AuthRequest } from '../types';
 import { authMiddleware, adminMiddleware } from '../middleware/auth';
 import { validate, vehicleValidation, uuidParam } from '../middleware/validation';
 import logger from '../utils/logger';
+import { createAuditLog } from '../services/audit';
 
 const router = Router();
+
+const logAudit = async (req: AuthRequest, action: any, targetType: string, targetId?: string, details?: any) => {
+  await createAuditLog({
+    userId: req.user?.userId,
+    userEmail: req.user?.email,
+    action,
+    targetType,
+    targetId,
+    details,
+    ipAddress: req.ip || req.socket.remoteAddress,
+    userAgent: req.get('user-agent'),
+  });
+};
 
 router.get('/', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
@@ -79,6 +93,12 @@ router.post('/', authMiddleware, adminMiddleware, validate(vehicleValidation), a
       },
     });
 
+    await logAudit(req, 'VEHICLE_CREATE', 'Vehicle', vehicle.id, { 
+      registrationNumber: vehicle.registrationNumber, 
+      make, 
+      model 
+    });
+
     res.status(201).json({ success: true, data: vehicle });
   } catch (error) {
     logger.error('Create vehicle error', { error: error instanceof Error ? error.message : String(error) });
@@ -91,6 +111,15 @@ router.put('/:id', authMiddleware, adminMiddleware, validate(uuidParam), async (
     const id = String(req.params.id);
     const { make, model, currentMileage, serviceInterval, status } = req.body;
 
+    const beforeVehicle = await prisma.vehicle.findUnique({ where: { id } });
+    const changes: Record<string, { old: any; new: any }> = {};
+    
+    if (make && make !== beforeVehicle?.make) changes.make = { old: beforeVehicle?.make, new: make };
+    if (model && model !== beforeVehicle?.model) changes.model = { old: beforeVehicle?.model, new: model };
+    if (currentMileage && currentMileage !== beforeVehicle?.currentMileage) changes.currentMileage = { old: beforeVehicle?.currentMileage, new: currentMileage };
+    if (serviceInterval && serviceInterval !== beforeVehicle?.serviceInterval) changes.serviceInterval = { old: beforeVehicle?.serviceInterval, new: serviceInterval };
+    if (status && status !== beforeVehicle?.status) changes.status = { old: beforeVehicle?.status, new: status };
+
     const vehicle = await prisma.vehicle.update({
       where: { id },
       data: {
@@ -102,6 +131,8 @@ router.put('/:id', authMiddleware, adminMiddleware, validate(uuidParam), async (
       },
     });
 
+    await logAudit(req, 'VEHICLE_UPDATE', 'Vehicle', id, { changes });
+
     res.json({ success: true, data: vehicle });
   } catch (error) {
     logger.error('Update vehicle error', { error: error instanceof Error ? error.message : String(error) });
@@ -112,7 +143,15 @@ router.put('/:id', authMiddleware, adminMiddleware, validate(uuidParam), async (
 router.delete('/:id', authMiddleware, adminMiddleware, validate(uuidParam), async (req: AuthRequest, res: Response) => {
   try {
     const id = String(req.params.id);
+    const vehicle = await prisma.vehicle.findUnique({ where: { id } });
     await prisma.vehicle.delete({ where: { id } });
+    
+    await logAudit(req, 'VEHICLE_DELETE', 'Vehicle', id, { 
+      registrationNumber: vehicle?.registrationNumber,
+      make: vehicle?.make,
+      model: vehicle?.model
+    });
+    
     res.json({ success: true, message: 'Vehicle deleted' });
   } catch (error) {
     logger.error('Delete vehicle error', { error: error instanceof Error ? error.message : String(error) });
@@ -195,7 +234,7 @@ router.put('/:id/assign', authMiddleware, adminMiddleware, validate(uuidParam), 
 
 router.get('/expiring', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
-    const days = parseInt(req.query.days as string) || 30;
+    const days = Math.max(1, Math.min(parseInt(req.query.days as string) || 30, 365));
     const futureDate = new Date();
     futureDate.setDate(futureDate.getDate() + days);
 

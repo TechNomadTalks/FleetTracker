@@ -34,17 +34,23 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const login = async (email: string, password: string) => {
     const response = await authService.login(email, password);
-    const { user, accessToken, refreshToken } = response.data.data;
+    const { user, accessToken, refreshToken, csrfToken } = response.data.data;
     localStorage.setItem('accessToken', accessToken);
     localStorage.setItem('refreshToken', refreshToken);
+    if (csrfToken) {
+      localStorage.setItem('csrfToken', csrfToken);
+    }
     setUser(user);
   };
 
   const register = async (data: { email: string; password: string; name: string; role?: string; adminSecret?: string }) => {
     const response = await authService.register(data);
-    const { user, accessToken, refreshToken } = response.data.data;
+    const { user, accessToken, refreshToken, csrfToken } = response.data.data;
     localStorage.setItem('accessToken', accessToken);
     localStorage.setItem('refreshToken', refreshToken);
+    if (csrfToken) {
+      localStorage.setItem('csrfToken', csrfToken);
+    }
     setUser(user);
   };
 
@@ -54,6 +60,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     } finally {
       localStorage.removeItem('accessToken');
       localStorage.removeItem('refreshToken');
+      localStorage.removeItem('csrfToken');
       setUser(null);
     }
   };

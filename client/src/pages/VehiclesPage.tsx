@@ -19,6 +19,7 @@ export const VehiclesPage: React.FC = () => {
   });
   const [showExpiring, setShowExpiring] = useState(false);
   const [expiringVehicles, setExpiringVehicles] = useState<Vehicle[]>([]);
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     fetchVehicles();
@@ -45,10 +46,18 @@ export const VehiclesPage: React.FC = () => {
   };
 
   const handleCheckout = async () => {
-    if (!selectedVehicle || !checkoutData.destination) {
-      toast.error('Please enter a destination');
+    if (!selectedVehicle || !checkoutData.destination || submitting) {
+      if (!checkoutData.destination) toast.error('Please enter a destination');
       return;
     }
+    
+    const originalVehicles = [...vehicles];
+    setVehicles(vehicles.map(v => 
+      v.id === selectedVehicle.id ? { ...v, status: 'out' as const } : v
+    ));
+    setSubmitting(true);
+    setShowCheckout(false);
+    
     try {
       await tripService.checkout({
         vehicleId: selectedVehicle.id,
@@ -58,12 +67,14 @@ export const VehiclesPage: React.FC = () => {
         notes: checkoutData.notes || undefined,
       });
       toast.success(`${selectedVehicle.registrationNumber} checked out!`);
-      setShowCheckout(false);
       setSelectedVehicle(null);
       setCheckoutData({ destination: '', currentMileage: 0, purpose: 'business', notes: '' });
       fetchVehicles();
     } catch (error: any) {
+      setVehicles(originalVehicles);
       toast.error(error.response?.data?.error || 'Checkout failed');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -78,11 +89,33 @@ export const VehiclesPage: React.FC = () => {
     setShowExpiring(true);
   };
 
+  const VehicleSkeleton = () => (
+    <div className="bg-gray-800 rounded-xl border border-gray-700 p-6 animate-pulse">
+      <div className="flex justify-between items-start mb-4">
+        <div>
+          <div className="h-6 bg-gray-700 rounded w-24 mb-2"></div>
+          <div className="h-4 bg-gray-700 rounded w-32"></div>
+        </div>
+        <div className="h-6 bg-gray-700 rounded w-16"></div>
+      </div>
+      <div className="space-y-3 mt-6">
+        <div className="flex justify-between"><div className="h-4 bg-gray-700 rounded w-24"></div><div className="h-4 bg-gray-700 rounded w-16"></div></div>
+        <div className="flex justify-between"><div className="h-4 bg-gray-700 rounded w-24"></div><div className="h-4 bg-gray-700 rounded w-16"></div></div>
+      </div>
+      <div className="mt-6 h-10 bg-gray-700 rounded"></div>
+    </div>
+  );
+
   if (loading) {
     return (
       <Layout>
-        <div className="flex justify-center items-center h-64">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+        <ToastContainer theme="dark" position="top-right" />
+        <div className="mb-8">
+          <div className="h-8 bg-gray-700 rounded w-48 animate-pulse mb-2"></div>
+          <div className="h-4 bg-gray-700 rounded w-64 animate-pulse"></div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {[...Array(6)].map((_, i) => <VehicleSkeleton key={i} />)}
         </div>
       </Layout>
     );

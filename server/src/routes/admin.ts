@@ -4,11 +4,25 @@ import { AuthRequest } from '../types';
 import { authMiddleware, adminMiddleware } from '../middleware/auth';
 import { validate, uuidParam } from '../middleware/validation';
 import logger from '../utils/logger';
+import { createAuditLog, getAuditLogs } from '../services/audit';
 
 const router = Router();
 
 router.use(authMiddleware);
 router.use(adminMiddleware);
+
+const logAudit = async (req: AuthRequest, action: any, targetType: string, targetId?: string, details?: any) => {
+  await createAuditLog({
+    userId: req.user?.userId,
+    userEmail: req.user?.email,
+    action,
+    targetType,
+    targetId,
+    details,
+    ipAddress: req.ip || req.socket.remoteAddress,
+    userAgent: req.get('user-agent'),
+  });
+};
 
 router.get('/users', async (req: AuthRequest, res: Response) => {
   try {
@@ -78,6 +92,19 @@ router.put('/users/:id', validate(uuidParam), async (req: AuthRequest, res: Resp
       return res.status(400).json({ success: false, error: 'Email already in use' });
     }
 
+    const beforeUser = await prisma.user.findUnique({ where: { id: id as string } });
+    const changes: Record<string, { old: any; new: any }> = {};
+    
+    if (name && name !== beforeUser?.name) {
+      changes.name = { old: beforeUser?.name, new: name };
+    }
+    if (email && email !== beforeUser?.email) {
+      changes.email = { old: beforeUser?.email, new: email };
+    }
+    if (role && role !== beforeUser?.role) {
+      changes.role = { old: beforeUser?.role, new: role };
+    }
+
     const user = await prisma.user.update({
       where: { id: id as string },
       data: {
@@ -96,6 +123,8 @@ router.put('/users/:id', validate(uuidParam), async (req: AuthRequest, res: Resp
       } as any,
     });
 
+    await logAudit(req, 'USER_UPDATE', 'User', id, { changes });
+
     res.json({ success: true, data: user });
   } catch (error) {
     logger.error('Admin update user error', { error: error instanceof Error ? error.message : String(error) });
@@ -112,6 +141,15 @@ router.put('/users/:id/deactivate', validate(uuidParam), async (req: AuthRequest
       return res.status(400).json({ success: false, error: 'Invalid status' });
     }
 
+    const targetUser = await prisma.user.findUnique({ where: { id: id as string } });
+    if (!targetUser) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    if (targetUser.id === req.user?.userId) {
+      return res.status(400).json({ success: false, error: 'Cannot deactivate yourself' });
+    }
+
     const user = await prisma.user.update({
       where: { id: id as string },
       data: { isActive } as any,
@@ -124,6 +162,14 @@ router.put('/users/:id/deactivate', validate(uuidParam), async (req: AuthRequest
         createdAt: true,
       } as any,
     });
+
+    await logAudit(
+      req, 
+      isActive ? 'USER_ACTIVATE' : 'USER_DEACTIVATE', 
+      'User', 
+      id, 
+      { deactivated: !isActive, email: targetUser.email, name: targetUser.name }
+    );
 
     res.json({ success: true, data: user });
   } catch (error) {
@@ -141,54 +187,19 @@ router.get('/audit-log', async (req: AuthRequest, res: Response) => {
     
     page = Math.max(1, Math.min(page, 100));
     limit = Math.max(1, Math.min(limit, 100));
-    const skip = (page - 1) * limit;
 
-    const tripWhere: any = {};
-    if (action) tripWhere.purpose = action;
-    if (userId) tripWhere.userId = userId;
-
-    const [trips, total] = await Promise.all([
-      prisma.trip.findMany({
-        where: Object.keys(tripWhere).length > 0 ? tripWhere : undefined,
-        include: {
-          user: { select: { id: true, name: true, email: true } },
-          vehicle: { select: { id: true, registrationNumber: true } },
-        },
-        orderBy: { startTime: 'desc' },
-        skip,
-        take: limit,
-      }),
-      prisma.trip.count({ where: Object.keys(tripWhere).length > 0 ? tripWhere : undefined }),
-    ]);
-
-    const auditLogs = trips.map((trip: any) => ({
-      id: trip.id,
-      action: 'trip_' + (trip.endTime ? 'completed' : 'started'),
-      user: trip.user,
-      details: {
-        vehicle: trip.vehicle?.registrationNumber,
-        destination: trip.destination,
-        mileage: trip.mileageDriven,
-        purpose: trip.purpose,
-      },
-      timestamp: trip.startTime,
-    }));
+    const result = await getAuditLogs(page, limit, action || undefined, userId || undefined);
 
     res.json({
       success: true,
       data: {
-        logs: auditLogs,
-        pagination: {
-          page,
-          limit,
-          total,
-          totalPages: Math.ceil(total / limit),
-        },
+        logs: result.logs,
+        pagination: result.pagination,
       },
     });
   } catch (error) {
     logger.error('Admin audit log error', { error: error instanceof Error ? error.message : String(error) });
-    res.status(500).json({ success: false, error: 'Failed to get audit log' });
+    res.status(500).json({ success: false, error: 'Failed to get audit logs' });
   }
 });
 

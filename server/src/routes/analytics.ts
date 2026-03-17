@@ -8,10 +8,14 @@ const router = Router();
 
 router.use(authMiddleware);
 
+const sanitizeNumber = (value: string | undefined, defaultVal: number, min: number, max: number): number => {
+  const parsed = parseInt(value as string) || defaultVal;
+  return Math.max(min, Math.min(parsed, max));
+};
+
 router.get('/trips-by-month', adminMiddleware, async (req: AuthRequest, res: Response) => {
   try {
-    let months = parseInt(req.query.months as string) || 6;
-    months = Math.max(1, Math.min(months, 24));
+    const months = sanitizeNumber(req.query.months as string, 6, 1, 24);
     
     const startDate = new Date();
     startDate.setMonth(startDate.getMonth() - months);

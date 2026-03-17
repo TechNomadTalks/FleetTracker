@@ -3,31 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
-}
-
-enum Role {
-  admin
-  user
-}
-
-enum VehicleStatus {
-  available
-  out
-}
-
-enum FuelType {
-  petrol
-  diesel
-  electric
-  hybrid
-}
-
-enum NotificationType {
-  checkout
-  checkin
-  service_reminder
 }
 
 model User {
@@ -35,48 +12,94 @@ model User {
   email             String   @unique
   passwordHash      String
   name              String
-  role              Role     @default(user)
+  role              String   @default("user")
   emailNotifications Boolean  @default(true)
   isActive          Boolean  @default(true)
   refreshToken      String?
+  tokenVersion      Int      @default(0)
+  passwordResetToken String?
+  passwordResetExpires DateTime?
+  emailVerifyToken  String?
+  emailVerified     Boolean  @default(false)
+  licenseNumber     String?
+  licenseExpiry     DateTime?
+  rating            Float    @default(5.0)
+  totalTrips        Int      @default(0)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
   trips          Trip[]
   notifications  Notification[]
   vehicles       Vehicle[]
+  sessions       UserSession[]
+}
+
+model UserSession {
+  id          String   @id @default(uuid())
+  userId      String
+  token       String   @unique
+  ipAddress   String?
+  userAgent   String?
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 model Vehicle {
-  id                String        @id @default(uuid())
-  registrationNumber String        @unique
+  id                String   @id @default(uuid())
+  registrationNumber String   @unique
   make              String
   model             String
+  year              Int?
+  vin               String?
   currentMileage    Int            @default(0)
   serviceInterval   Int            @default(10000)
   lastServiceMileage Int           @default(0)
-  status            VehicleStatus @default(available)
+  status            String         @default("available")
   assignedUserId    String?
   insuranceExpiry   DateTime?
   registrationExpiry DateTime?
-  fuelType          FuelType?
+  fuelType          String?
   fuelEfficiency    Float?
+  purchaseDate      DateTime?
+  purchasePrice     Float?
+  currentValue      Float?
+  depreciationRate  Float?
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
 
   assignedUser      User?         @relation(fields: [assignedUserId], references: [id])
-  trips        Trip[]
-  serviceLogs  ServiceLog[]
+  trips             Trip[]
+  serviceLogs       ServiceLog[]
+  scheduledServices ScheduledService[]
 }
 
-enum TripPurpose {
-  business
-  personal
-  maintenance
+model ScheduledService {
+  id              String   @id @default(uuid())
+  vehicleId       String
+  serviceType     String
+  description     String?
+  scheduledDate   DateTime
+  mileageDue      Int?
+  recurring       Boolean  @default(false)
+  recurringIntervalDays Int?
+  cost            Float?
+  status          String   @default("scheduled")
+  completedAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  vehicle         Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([vehicleId])
+  @@index([scheduledDate])
 }
 
 model Trip {
-  id            String       @id @default(uuid())
+  id            String   @id @default(uuid())
   vehicleId     String
   userId        String
   destination   String
@@ -85,10 +108,13 @@ model Trip {
   startTime     DateTime     @default(now())
   endTime       DateTime?
   mileageDriven Int?
-  purpose       TripPurpose  @default(business)
+  purpose       String      @default("business")
   notes         String?
   expenses      Float?
   receipt       Bytes?
+  fuelCost      Float?
+  rating        Int?
+  feedback      String?
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
@@ -101,6 +127,7 @@ model ServiceLog {
   vehicleId       String
   serviceType     String
   mileageAtService Int
+  cost            Float?
   notes           String?
   performedAt     DateTime @default(now())
   createdAt       DateTime @default(now())
@@ -109,12 +136,66 @@ model ServiceLog {
 }
 
 model Notification {
-  id        String           @id @default(uuid())
+  id        String   @id @default(uuid())
   userId    String
-  type      NotificationType
+  type      String
+  title     String?
   message   String
-  read      Boolean          @default(false)
-  createdAt DateTime         @default(now())
+  read      Boolean  @default(false)
+  readAt    DateTime?
+  createdAt DateTime @default(now())
 
-  user      User             @relation(fields: [userId], references: [id])
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([read, createdAt])
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  userId      String?
+  userEmail   String?
+  action      String
+  targetType  String
+  targetId    String?
+  details     String?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  @@index([action])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model Integration {
+  id          String   @id @default(uuid())
+  type        String
+  config      String
+  isActive    Boolean  @default(false)
+  lastSyncAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([type])
+}
+
+model DashboardWidget {
+  id        String   @id @default(uuid())
+  type      String
+  title     String
+  position  Int      @default(0)
+  config    String?
+  isVisible Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model SavedFilter {
+  id          String   @id @default(uuid())
+  name        String
+  type        String
+  filterData  String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
