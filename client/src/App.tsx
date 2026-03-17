@@ -17,6 +17,9 @@ import { AuditLogPage } from './pages/AuditLogPage';
 import { ScheduledServicesPage } from './pages/ScheduledServicesPage';
 import { AdvancedReportsPage } from './pages/AdvancedReportsPage';
 import { IntegrationsPage } from './pages/IntegrationsPage';
+import { TripMapPage } from './pages/TripMapPage';
+import { VehicleCalendarPage } from './pages/VehicleCalendarPage';
+import { DashboardCustomPage } from './pages/DashboardCustomPage';
 import { SocketEvents } from './components/SocketEvents';
 import { useAuth } from './context/AuthContext';
 import { useEffect } from 'react';
@@ -55,6 +58,8 @@ const AppContent: React.FC = () => {
           <Route path="/vehicles" element={<VehiclesPage />} />
           <Route path="/vehicles/:id" element={<VehicleDetailPage />} />
           <Route path="/trips" element={<TripsPage />} />
+          <Route path="/trips/map" element={<TripMapPage />} />
+          <Route path="/calendar" element={<VehicleCalendarPage />} />
           <Route path="/services" element={<ServicesPage />} />
           <Route path="/scheduled-services" element={<ScheduledServicesPage />} />
           <Route path="/profile" element={<ProfilePage />} />
@@ -63,6 +68,7 @@ const AppContent: React.FC = () => {
         <Route element={<AdminRoute />}>
           <Route path="/reports" element={<ReportsPage />} />
           <Route path="/advanced-reports" element={<AdvancedReportsPage />} />
+          <Route path="/customize" element={<DashboardCustomPage />} />
           <Route path="/integrations" element={<IntegrationsPage />} />
           <Route path="/admin/users" element={<AdminUsersPage />} />
           <Route path="/admin/audit" element={<AuditLogPage />} />

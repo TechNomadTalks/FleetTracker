@@ -25,6 +25,11 @@ import integrationsRoutes from './routes/integrations';
 import dashboardCustomRoutes from './routes/dashboardCustom';
 import importExportRoutes from './routes/importExport';
 
+import { requestIdMiddleware, errorHandler } from './middleware/requestId';
+import { sanitizeInput } from './middleware/sanitization';
+import { ipLimiter, loginLimiter } from './middleware/bruteForce';
+import { versionMiddleware } from './middleware/versioning';
+
 dotenv.config();
 
 const requiredEnvVars = ['JWT_SECRET', 'JWT_REFRESH_SECRET', 'DATABASE_URL'];
@@ -55,6 +60,10 @@ const corsOptions = {
 const app = express();
 const httpServer = createServer(app);
 
+app.use(requestIdMiddleware);
+app.use(versionMiddleware);
+app.use(sanitizeInput);
+
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -75,6 +84,7 @@ app.use(helmet({
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '10kb' }));
 app.use(express.urlencoded({ extended: true, limit: '10kb' }));
+app.use(ipLimiter);
 
 app.disable('x-powered-by');
 

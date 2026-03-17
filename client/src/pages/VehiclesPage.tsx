@@ -19,7 +19,9 @@ export const VehiclesPage: React.FC = () => {
   });
   const [showExpiring, setShowExpiring] = useState(false);
   const [expiringVehicles, setExpiringVehicles] = useState<Vehicle[]>([]);
-  const [submitting, setSubmitting] = useState(false);
+  const [selectedVehicles, setSelectedVehicles] = useState<Set<string>>(new Set());
+  const [showBulkMenu, setShowBulkMenu] = useState(false);
+  const [bulkAction, setBulkAction] = useState<'delete' | 'service' | null>(null);
 
   useEffect(() => {
     fetchVehicles();
@@ -46,18 +48,10 @@ export const VehiclesPage: React.FC = () => {
   };
 
   const handleCheckout = async () => {
-    if (!selectedVehicle || !checkoutData.destination || submitting) {
-      if (!checkoutData.destination) toast.error('Please enter a destination');
+    if (!selectedVehicle || !checkoutData.destination) {
+      toast.error('Please enter a destination');
       return;
     }
-    
-    const originalVehicles = [...vehicles];
-    setVehicles(vehicles.map(v => 
-      v.id === selectedVehicle.id ? { ...v, status: 'out' as const } : v
-    ));
-    setSubmitting(true);
-    setShowCheckout(false);
-    
     try {
       await tripService.checkout({
         vehicleId: selectedVehicle.id,
@@ -67,14 +61,12 @@ export const VehiclesPage: React.FC = () => {
         notes: checkoutData.notes || undefined,
       });
       toast.success(`${selectedVehicle.registrationNumber} checked out!`);
+      setShowCheckout(false);
       setSelectedVehicle(null);
       setCheckoutData({ destination: '', currentMileage: 0, purpose: 'business', notes: '' });
       fetchVehicles();
     } catch (error: any) {
-      setVehicles(originalVehicles);
       toast.error(error.response?.data?.error || 'Checkout failed');
-    } finally {
-      setSubmitting(false);
     }
   };
 
@@ -89,33 +81,60 @@ export const VehiclesPage: React.FC = () => {
     setShowExpiring(true);
   };
 
-  const VehicleSkeleton = () => (
-    <div className="bg-gray-800 rounded-xl border border-gray-700 p-6 animate-pulse">
-      <div className="flex justify-between items-start mb-4">
-        <div>
-          <div className="h-6 bg-gray-700 rounded w-24 mb-2"></div>
-          <div className="h-4 bg-gray-700 rounded w-32"></div>
-        </div>
-        <div className="h-6 bg-gray-700 rounded w-16"></div>
-      </div>
-      <div className="space-y-3 mt-6">
-        <div className="flex justify-between"><div className="h-4 bg-gray-700 rounded w-24"></div><div className="h-4 bg-gray-700 rounded w-16"></div></div>
-        <div className="flex justify-between"><div className="h-4 bg-gray-700 rounded w-24"></div><div className="h-4 bg-gray-700 rounded w-16"></div></div>
-      </div>
-      <div className="mt-6 h-10 bg-gray-700 rounded"></div>
-    </div>
-  );
+  const toggleSelectVehicle = (id: string) => {
+    const newSelected = new Set(selectedVehicles);
+    if (newSelected.has(id)) {
+      newSelected.delete(id);
+    } else {
+      newSelected.add(id);
+    }
+    setSelectedVehicles(newSelected);
+  };
+
+  const selectAll = () => {
+    if (selectedVehicles.size === vehicles.length) {
+      setSelectedVehicles(new Set());
+    } else {
+      setSelectedVehicles(new Set(vehicles.map(v => v.id)));
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedVehicles.size === 0) return;
+    if (!confirm(`Are you sure you want to delete ${selectedVehicles.size} vehicle(s)?`)) return;
+    
+    try {
+      for (const id of selectedVehicles) {
+        await vehicleService.delete(id);
+      }
+      toast.success(`Deleted ${selectedVehicles.size} vehicle(s)`);
+      setSelectedVehicles(new Set());
+      fetchVehicles();
+    } catch (error) {
+      toast.error('Failed to delete vehicles');
+    }
+  };
+
+  const handleBulkService = async () => {
+    if (selectedVehicles.size === 0) return;
+    
+    try {
+      for (const id of selectedVehicles) {
+        await vehicleService.update(id, { serviceInterval: 10000 });
+      }
+      toast.success(`Service scheduled for ${selectedVehicles.size} vehicle(s)`);
+      setSelectedVehicles(new Set());
+      fetchVehicles();
+    } catch (error) {
+      toast.error('Failed to update vehicles');
+    }
+  };
 
   if (loading) {
     return (
       <Layout>
-        <ToastContainer theme="dark" position="top-right" />
-        <div className="mb-8">
-          <div className="h-8 bg-gray-700 rounded w-48 animate-pulse mb-2"></div>
-          <div className="h-4 bg-gray-700 rounded w-64 animate-pulse"></div>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {[...Array(6)].map((_, i) => <VehicleSkeleton key={i} />)}
+        <div className="flex justify-center items-center h-64">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
         </div>
       </Layout>
     );
@@ -131,6 +150,37 @@ export const VehiclesPage: React.FC = () => {
           <p className="text-gray-400 mt-1">Manage your fleet vehicles</p>
         </div>
         <div className="flex items-center space-x-4">
+          {selectedVehicles.size > 0 && (
+            <div className="flex items-center space-x-2 bg-blue-600/20 border border-blue-600/30 rounded-lg px-4 py-2">
+              <span className="text-blue-400 text-sm font-medium">
+                {selectedVehicles.size} selected
+              </span>
+              <button
+                onClick={() => setShowBulkMenu(!showBulkMenu)}
+                className="p-1 hover:bg-blue-600/30 rounded"
+              >
+                <svg className="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              {showBulkMenu && (
+                <div className="absolute mt-2 right-0 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-10">
+                  <button
+                    onClick={() => { handleBulkDelete(); setShowBulkMenu(false); }}
+                    className="block w-full text-left px-4 py-2 text-red-400 hover:bg-gray-700"
+                  >
+                    Delete Selected
+                  </button>
+                  <button
+                    onClick={() => { handleBulkService(); setShowBulkMenu(false); }}
+                    className="block w-full text-left px-4 py-2 text-yellow-400 hover:bg-gray-700"
+                  >
+                    Reset Service Interval
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           <button
             onClick={handleViewExpiring}
             className="flex items-center space-x-2 px-4 py-2 bg-yellow-600/20 hover:bg-yellow-600/30 border border-yellow-600/30 rounded-lg text-yellow-400 transition"
@@ -152,18 +202,39 @@ export const VehiclesPage: React.FC = () => {
         </div>
       </div>
 
+      <div className="mb-4 flex items-center space-x-2">
+        <input
+          type="checkbox"
+          checked={selectedVehicles.size === vehicles.length && vehicles.length > 0}
+          onChange={selectAll}
+          className="w-5 h-5 rounded border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-500"
+        />
+        <span className="text-gray-400 text-sm">Select all</span>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {vehicles.map((vehicle) => (
           <div
             key={vehicle.id}
-            onClick={() => navigate(`/vehicles/${vehicle.id}`)}
-            className="bg-gray-800 rounded-xl border border-gray-700 hover:border-gray-600 transition duration-200 overflow-hidden cursor-pointer"
+            className={`bg-gray-800 rounded-xl border border-gray-700 hover:border-gray-600 transition duration-200 overflow-hidden ${selectedVehicles.has(vehicle.id) ? 'ring-2 ring-blue-500' : ''}`}
           >
             <div className="p-6">
               <div className="flex justify-between items-start mb-4">
-                <div>
-                  <h3 className="text-xl font-bold text-white">{vehicle.registrationNumber}</h3>
-                  <p className="text-gray-400">{vehicle.make} {vehicle.model}</p>
+                <div className="flex items-center space-x-3">
+                  <input
+                    type="checkbox"
+                    checked={selectedVehicles.has(vehicle.id)}
+                    onChange={(e) => {
+                      e.stopPropagation();
+                      toggleSelectVehicle(vehicle.id);
+                    }}
+                    className="w-5 h-5 rounded border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-500"
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                  <div>
+                    <h3 className="text-xl font-bold text-white">{vehicle.registrationNumber}</h3>
+                    <p className="text-gray-400">{vehicle.make} {vehicle.model}</p>
+                  </div>
                 </div>
                 <span
                   className={`px-3 py-1 text-xs font-medium rounded-full ${

@@ -15,11 +15,14 @@ export const Navbar: React.FC = () => {
     { to: '/dashboard', label: 'Dashboard' },
     { to: '/vehicles', label: 'Vehicles' },
     { to: '/trips', label: 'Trips' },
+    { to: '/trips/map', label: 'Map' },
+    { to: '/calendar', label: 'Calendar' },
     { to: '/services', label: 'Services' },
   ];
 
   if (user?.role === 'admin') {
     navLinks.push({ to: '/reports', label: 'Reports' });
+    navLinks.push({ to: '/customize', label: 'Customize' });
     navLinks.push({ to: '/admin/users', label: 'Users' });
     navLinks.push({ to: '/admin/audit', label: 'Audit' });
   }
